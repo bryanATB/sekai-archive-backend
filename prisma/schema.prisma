@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────
+// USUARIO
+// ─────────────────────────────────────────
+
+model Usuario {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  username      String   @unique
+  password      String
+  puntos        Int      @default(0)
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+  esAdmin       Boolean  @default(false)
+
+  // Relaciones
+  inventario    Inventario[]
+  albumEntradas AlbumEntrada[]
+  aperturas     Apertura[]
+  mejoras       Mejora[]
+  pity          Pity[]
+
+  @@map("usuarios")
+}
+
+// ─────────────────────────────────────────
+// CARTA
+// ─────────────────────────────────────────
+
+enum Rareza {
+  COMUN // 1★
+  RARA // 2★
+  EPICA // 3★
+  MITICA // 4★
+  LEGENDARIA // 5★
+  SECRETA // 6★
+  EXCLUSIVA // 7★
+  SEKAI // 8★
+}
+
+model Carta {
+  id               String   @id @default(uuid())
+  nombre           String
+  personaje        String
+  serie            String // ej: "Naruto", "Attack on Titan"
+  rareza           Rareza
+  imagenUrl        String
+  descripcion      String?
+  limitada         Boolean  @default(false) // true = solo aparece por tiempo limitado
+  activa           Boolean  @default(true) // false = retirada del pool de gacha
+  creadaEn         DateTime @default(now())
+  albumId          String?
+  album            Album?   @relation(fields: [albumId], references: [id])
+  imagenReversoUrl String?
+
+  // Relaciones
+  inventario         Inventario[]
+  albumEntradas      AlbumEntrada[]
+  sobreCartas        SobreCarta[]
+  aperturaResultados AperturaResultado[]
+
+  @@map("cartas")
+}
+
+// ─────────────────────────────────────────
+// SOBRE
+// ─────────────────────────────────────────
+
+model Sobre {
+  id          String   @id @default(uuid())
+  nombre      String // ej: "Sobre Estándar", "Sobre Shonen"
+  descripcion String?
+  costo       Int // puntos necesarios para abrir
+  cantCartas  Int      @default(5)
+  activo      Boolean  @default(true)
+  creadoEn    DateTime @default(now())
+  imagenUrl   String?
+
+  // Qué cartas pueden salir en este sobre y con qué peso
+  sobreCartas SobreCarta[]
+  aperturas   Apertura[]
+  pity        Pity[]
+
+  @@map("sobres")
+}
+
+// Tabla intermedia: qué cartas pertenecen a qué sobre
+// y con qué peso relativo (para el gacha)
+model SobreCarta {
+  id      String @id @default(uuid())
+  sobreId String
+  cartaId String
+  peso    Int    @default(100) // mayor peso = más probable
+
+  sobre Sobre @relation(fields: [sobreId], references: [id])
+  carta Carta @relation(fields: [cartaId], references: [id])
+
+  @@unique([sobreId, cartaId])
+  @@map("sobre_cartas")
+}
+
+// ─────────────────────────────────────────
+// APERTURA (historial de sobres abiertos)
+// ─────────────────────────────────────────
+
+model Apertura {
+  id             String   @id @default(uuid())
+  usuarioId      String
+  sobreId        String
+  puntosGastados Int
+  abiertaEn      DateTime @default(now())
+
+  sobre           Sobre               @relation(fields: [sobreId], references: [id])
+  usuario         Usuario             @relation(fields: [usuarioId], references: [id])
+  cartasObtenidas AperturaResultado[]
+
+  @@map("aperturas")
+}
+
+// Las cartas específicas que salieron en una apertura
+model AperturaResultado {
+  id         String  @id @default(uuid())
+  aperturaId String
+  cartaId    String
+  fueNueva   Boolean // true si el usuario no la tenía antes
+
+  apertura Apertura @relation(fields: [aperturaId], references: [id])
+  carta    Carta    @relation(fields: [cartaId], references: [id])
+
+  @@map("apertura_resultados")
+}
+
+// ─────────────────────────────────────────
+// INVENTARIO
+// ─────────────────────────────────────────
+
+model Inventario {
+  id         String   @id @default(uuid())
+  usuarioId  String
+  cartaId    String
+  cantidad   Int      @default(1)
+  obtenidaEn DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  carta   Carta   @relation(fields: [cartaId], references: [id])
+
+  @@unique([usuarioId, cartaId]) // un registro por carta por usuario, cantidad sube
+  @@map("inventario")
+}
+
+// ─────────────────────────────────────────
+// ÁLBUM
+// ─────────────────────────────────────────
+
+model Album {
+  id          String   @id @default(uuid())
+  nombre      String // ej: "Álbum Shonen", "Álbum Isekai"
+  descripcion String?
+  totalCartas Int // cuántas cartas tiene este álbum
+  imagenUrl   String?
+  creadoEn    DateTime @default(now())
+
+  cartas   Carta[]
+  entradas AlbumEntrada[]
+
+  @@map("albums")
+}
+
+// Qué posición del álbum tiene qué carta pegada de qué usuario
+model AlbumEntrada {
+  id        String   @id @default(uuid())
+  usuarioId String
+  albumId   String
+  cartaId   String
+  posicion  Int // posición fija en el álbum (1, 2, 3...)
+  pegadaEn  DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  album   Album   @relation(fields: [albumId], references: [id])
+  carta   Carta   @relation(fields: [cartaId], references: [id])
+
+  @@unique([usuarioId, albumId, posicion]) // un usuario no puede pegar dos cartas en la misma posición
+  @@unique([usuarioId, albumId, cartaId]) // un usuario no puede pegar la misma carta dos veces en el mismo álbum
+  @@map("album_entradas")
+}
+
+// ─────────────────────────────────────────
+// PITY (contador anti-mala suerte del gacha)
+// ─────────────────────────────────────────
+
+model Pity {
+  id                String @id @default(uuid())
+  usuarioId         String
+  sobreId           String
+  contadorExclusiva Int    @default(0)
+  contadorSekai     Int    @default(0)
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  sobre   Sobre   @relation(fields: [sobreId], references: [id])
+
+  @@unique([usuarioId, sobreId])
+  @@map("pity")
+}
+
+model Mejora {
+  id         String     @id @default(uuid())
+  usuarioId  String
+  tipo       TipoMejora
+  nivel      Int        @default(1)
+  compradaEn DateTime   @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@unique([usuarioId, tipo])
+  @@map("mejoras")
+}
+
+enum TipoMejora {
+  MULTIPLICADOR
+  AUTO_CLICKER
+}
